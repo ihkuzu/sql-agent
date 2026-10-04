@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .agent import Agent
 from .db import ReadOnlyDB
+from .llm import LLMError
 
 
 @dataclass
@@ -63,7 +64,12 @@ def evaluate(agent: Agent, db: ReadOnlyDB, cases: list[Case]) -> list[Outcome]:
     outcomes = []
     for case in cases:
         gold = db.query(case.sql, max_rows=1000).rows
-        result = agent.run(case.question)
+        try:
+            result = agent.run(case.question)
+        except LLMError as error:
+            # one failing model call should not throw away the other results
+            outcomes.append(Outcome(case, False, False, 0, f"model error: {error}"))
+            continue
         outcomes.append(
             Outcome(case, result.finished and answer_matches(result.answer, gold),
                     result.finished, len(result.steps), result.answer)
@@ -76,6 +82,8 @@ def format_report(outcomes: list[Outcome]) -> str:
     for o in outcomes:
         mark = "ok  " if o.correct else "FAIL"
         lines.append(f"{mark} {o.case.id:<4} steps={o.steps:<2} {o.case.question}")
+        if not o.correct:
+            lines.append(f"       answer: {' '.join(o.answer.split())[:160]}")
     total = len(outcomes)
     correct = sum(o.correct for o in outcomes)
     unfinished = sum(not o.finished for o in outcomes)

@@ -47,6 +47,7 @@ def test_evaluate_and_report(db):
     assert "accuracy 1/2 = 0.50" in report
     assert report.splitlines()[0].startswith("ok")
     assert report.splitlines()[1].startswith("FAIL")
+    assert "answer: Atlantis" in report.splitlines()[2]
 
 
 def test_shipped_cases_run_against_the_sample_db(db):
@@ -56,3 +57,17 @@ def test_shipped_cases_run_against_the_sample_db(db):
         rows = db.query(case.sql, max_rows=1000).rows
         assert rows, case.id
         assert answer_matches(" ".join(str(v) for row in rows for v in row), rows)
+
+
+class BrokenLLM:
+    def chat(self, system, messages):
+        from sqlagent.llm import LLMError
+
+        raise LLMError("boom")
+
+
+def test_model_error_fails_one_case_but_keeps_the_run_going(db):
+    cases = [Case("a", "q1", "SELECT 1"), Case("b", "q2", "SELECT 1")]
+    outcomes = evaluate(Agent(BrokenLLM(), db), db, cases)
+    assert [o.correct for o in outcomes] == [False, False]
+    assert "model error: boom" in outcomes[0].answer
