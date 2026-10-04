@@ -121,3 +121,16 @@ def test_gemini_does_not_retry_client_errors():
     with pytest.raises(LLMError, match="403"):
         llm.chat("s", MESSAGES)
     assert len(calls) == 1
+
+
+def test_gemini_does_not_retry_when_daily_quota_is_spent():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(429, text="limit: 20 requests per day on Free Tier")
+
+    llm = GeminiLLM(api_key="k", pause=0, client=client(handler))
+    with pytest.raises(LLMError, match="429"):
+        llm.chat("s", MESSAGES)
+    assert len(calls) == 1

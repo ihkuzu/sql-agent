@@ -101,7 +101,9 @@ class GeminiLLM:
                 status = error.response.status_code
                 # Gemini sometimes fails to parse its own JSON output and asks for a retry
                 bad_json = status == 400 and "invalid JSON" in body
-                busy = status in (429, 500, 502, 503, 504)
+                # a spent daily quota will not recover within a few seconds
+                out_of_quota = status == 429 and "per day" in body.lower()
+                busy = status in (429, 500, 502, 503, 504) and not out_of_quota
                 if (bad_json or busy) and attempt < self.retries:
                     if bad_json:
                         prompt = f"{self._transcript(messages)}\n\n(Previous attempt failed: {body[:200]})"
