@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Protocol
 
 import httpx
@@ -61,10 +62,12 @@ class GeminiLLM:
         api_key: str | None = None,
         timeout: float = 120.0,
         client: httpx.Client | None = None,
-        retries: int = 2,
+        retries: int = 4,
+        pause: float = 2.0,
     ):
         self.model = model
         self.retries = retries
+        self.pause = pause
         self._api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self._api_key:
             raise LLMError("set GEMINI_API_KEY to use the gemini model")
@@ -95,11 +98,16 @@ class GeminiLLM:
                 break
             except httpx.HTTPStatusError as error:
                 body = error.response.text
+                status = error.response.status_code
                 # Gemini sometimes fails to parse its own JSON output and asks for a retry
-                if error.response.status_code == 400 and "invalid JSON" in body and attempt < self.retries:
-                    prompt = f"{self._transcript(messages)}\n\n(Previous attempt failed: {body[:200]})"
+                bad_json = status == 400 and "invalid JSON" in body
+                busy = status in (429, 500, 502, 503, 504)
+                if (bad_json or busy) and attempt < self.retries:
+                    if bad_json:
+                        prompt = f"{self._transcript(messages)}\n\n(Previous attempt failed: {body[:200]})"
+                    time.sleep(self.pause * (attempt + 1))
                     continue
-                raise LLMError(f"Gemini returned {error.response.status_code}: {body[:200]}") from error
+                raise LLMError(f"Gemini returned {status}: {body[:200]}") from error
             except (httpx.HTTPError, KeyError, ValueError) as error:
                 raise LLMError(f"request to Gemini failed: {error}") from error
 

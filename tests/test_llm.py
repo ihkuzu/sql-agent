@@ -85,12 +85,39 @@ def test_gemini_retries_invalid_json_error():
         step = {"type": "model_output", "content": [{"type": "text", "text": "ok"}]}
         return httpx.Response(200, json={"steps": [step]})
 
-    llm = GeminiLLM(api_key="k", client=client(handler))
+    llm = GeminiLLM(api_key="k", pause=0, client=client(handler))
     assert llm.chat("s", MESSAGES) == "ok"
     assert len(bodies) == 3 and "Previous attempt failed" in bodies[1]
 
 
 def test_gemini_gives_up_after_retries():
-    llm = GeminiLLM(api_key="k", retries=1, client=client(lambda r: httpx.Response(400, text="invalid JSON")))
+    llm = GeminiLLM(api_key="k", retries=1, pause=0, client=client(lambda r: httpx.Response(400, text="invalid JSON")))
     with pytest.raises(LLMError, match="400"):
         llm.chat("s", MESSAGES)
+
+
+def test_gemini_retries_when_overloaded():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) < 3:
+            return httpx.Response(503, text="high demand")
+        step = {"type": "model_output", "content": [{"type": "text", "text": "fine"}]}
+        return httpx.Response(200, json={"steps": [step]})
+
+    llm = GeminiLLM(api_key="k", pause=0, client=client(handler))
+    assert llm.chat("s", MESSAGES) == "fine" and len(calls) == 3
+
+
+def test_gemini_does_not_retry_client_errors():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(403, text="denied")
+
+    llm = GeminiLLM(api_key="k", pause=0, client=client(handler))
+    with pytest.raises(LLMError, match="403"):
+        llm.chat("s", MESSAGES)
+    assert len(calls) == 1
