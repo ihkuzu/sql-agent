@@ -49,6 +49,9 @@ class OllamaLLM:
             response = self._client.post(f"{self.host}/api/chat", json=payload)
             response.raise_for_status()
             return response.json()["message"]["content"].strip()
+        except httpx.HTTPStatusError as error:
+            detail = error.response.text[:300]
+            raise LLMError(f"Ollama returned {error.response.status_code}: {detail}") from error
         except (httpx.HTTPError, KeyError, ValueError) as error:
             raise LLMError(f"request to Ollama at {self.host} failed: {error}") from error
 

@@ -28,9 +28,10 @@ def test_ollama_request_and_reply():
     assert len(seen["body"]["messages"]) == 3
 
 
-def test_ollama_error():
-    llm = OllamaLLM(client=client(lambda r: httpx.Response(500)))
-    with pytest.raises(LLMError):
+def test_ollama_error_includes_server_message():
+    body = '{"error":"model runner has unexpectedly stopped"}'
+    llm = OllamaLLM(client=client(lambda r: httpx.Response(500, text=body)))
+    with pytest.raises(LLMError, match="500.*unexpectedly stopped"):
         llm.chat("s", MESSAGES)
 
 
