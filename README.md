@@ -86,7 +86,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-65 tests run without a model. A scripted model replays prepared replies, which makes
+66 tests run without a model. A scripted model replays prepared replies, which makes
 the loop deterministic: the normal path, invalid JSON, unknown tools, wrong arguments,
 blocked SQL, SQL errors, repeated calls and the step limit are all covered. The guard,
 the read-only connection and the query timeout have their own tests, and the model
