@@ -61,8 +61,10 @@ class GeminiLLM:
         api_key: str | None = None,
         timeout: float = 120.0,
         client: httpx.Client | None = None,
+        retries: int = 2,
     ):
         self.model = model
+        self.retries = retries
         self._api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self._api_key:
             raise LLMError("set GEMINI_API_KEY to use the gemini model")
@@ -75,24 +77,31 @@ class GeminiLLM:
         return "\n\n".join(lines) + "\n\nAssistant:"
 
     def chat(self, system: str, messages: Messages) -> str:
-        payload = {
-            "model": self.model,
-            "system_instruction": system,
-            "input": self._transcript(messages),
-            "generation_config": {"thinking_level": "low"},
-        }
-        try:
-            response = self._client.post(
-                self.url, json=payload, headers={"x-goog-api-key": self._api_key}
-            )
-            response.raise_for_status()
-            steps = response.json()["steps"]
-        except httpx.HTTPStatusError as error:
-            raise LLMError(
-                f"Gemini returned {error.response.status_code}: {error.response.text[:200]}"
-            ) from error
-        except (httpx.HTTPError, KeyError, ValueError) as error:
-            raise LLMError(f"request to Gemini failed: {error}") from error
+        prompt = self._transcript(messages)
+        steps = None
+        for attempt in range(self.retries + 1):
+            payload = {
+                "model": self.model,
+                "system_instruction": system,
+                "input": prompt,
+                "generation_config": {"thinking_level": "low"},
+            }
+            try:
+                response = self._client.post(
+                    self.url, json=payload, headers={"x-goog-api-key": self._api_key}
+                )
+                response.raise_for_status()
+                steps = response.json()["steps"]
+                break
+            except httpx.HTTPStatusError as error:
+                body = error.response.text
+                # Gemini sometimes fails to parse its own JSON output and asks for a retry
+                if error.response.status_code == 400 and "invalid JSON" in body and attempt < self.retries:
+                    prompt = f"{self._transcript(messages)}\n\n(Previous attempt failed: {body[:200]})"
+                    continue
+                raise LLMError(f"Gemini returned {error.response.status_code}: {body[:200]}") from error
+            except (httpx.HTTPError, KeyError, ValueError) as error:
+                raise LLMError(f"request to Gemini failed: {error}") from error
 
         texts = [
             block["text"]
