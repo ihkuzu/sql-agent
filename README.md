@@ -25,12 +25,15 @@ model -> {"final": "..."} -> answer
 - **Protocol.** The model replies with one JSON object per turn, either a tool call or
   `{"final": ...}`. Because it is plain JSON in plain text, the same loop works with
   any chat model. Replies wrapped in code fences or extra prose are still parsed.
+- **Context.** The prompt already contains the schema, the foreign keys and the values of short text columns such as `status`, so the model does not spend its steps exploring.
 - **Safety, in layers.** `run_sql` only accepts a single `SELECT` or `WITH` statement
   without comments (`guard.py`). The database is opened read-only at the SQLite level,
   so a query that slips past the guard still cannot write. Queries are stopped after a
   time limit and results are capped at 50 rows.
 - **Loop control.** A step limit ends runs that go nowhere, and an identical repeated
-  tool call is rejected with a hint to try something else.
+  tool call is rejected with a hint to try something else. A final answer is only
+  accepted after at least one successful query, because small models otherwise answer
+  from memory.
 - **Models.** Ollama (default `llama3.2:3b`, runs on your machine) or Gemini.
 
 ## Run it
@@ -76,8 +79,28 @@ question, then checks that all values from the reference result appear in the an
 unfinished runs and the mean number of tool calls.
 
 The questions range from single counts to joins and aggregation, for example
-"Which product category earned the most revenue from delivered orders?". Results depend
-heavily on the model, so I will publish them per model rather than as one number.
+"Which product category earned the most revenue from delivered orders?".
+
+Results with `llama3.2:3b` on a laptop (RTX 2060), one run each:
+
+| version of the agent                       | correct | accuracy |
+| ------------------------------------------ | ------- | -------- |
+| first version                              | 2/12    | 0.17     |
+| + final answer only after a query          | 3/12    | 0.25     |
+| + schema and column values in the prompt   | 8/12    | 0.67     |
+
+The first run showed the main failure: the small model answered from memory without
+touching the database (several runs with zero tool calls). Requiring a successful
+query before the final answer fixed that. The remaining mistakes were wrong filters and
+wasted steps on exploring the schema, so the schema now goes into the prompt up front.
+
+What still fails: a wrong date filter (answering "no orders in 2025"), a category
+question answered with a product instead of a category, and two questions that run out of steps. A 3B
+model is weak at multi-step SQL.
+
+Two caveats. The prompt was tuned while looking at these same 12 questions, so 0.67 is
+optimistic for new questions. And 12 questions from one run is a small sample, so
+treat differences of one or two questions as noise.
 
 ## Tests
 
@@ -86,7 +109,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-66 tests run without a model. A scripted model replays prepared replies, which makes
+72 tests run without a model. A scripted model replays prepared replies, which makes
 the loop deterministic: the normal path, invalid JSON, unknown tools, wrong arguments,
 blocked SQL, SQL errors, repeated calls and the step limit are all covered. The guard,
 the read-only connection and the query timeout have their own tests, and the model
@@ -104,7 +127,8 @@ clients are tested against mocked HTTP responses.
 
 ## Roadmap
 
-- [ ] Publish evaluation results for a local model and a hosted model
+- [ ] Compare a larger model (7B) and a hosted model on the same questions
+- [ ] Evaluate on questions that were not used to tune the prompt
 - [ ] Let the model ask for a chart of a result
 - [ ] Add a second database for a multi-database question
 
