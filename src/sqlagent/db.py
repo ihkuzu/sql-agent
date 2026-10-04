@@ -47,6 +47,26 @@ class ReadOnlyDB:
         cur = self._conn.execute(f'PRAGMA table_info("{table}")')
         return [(row[1], row[2] or "") for row in cur.fetchall()]
 
+    def schema_text(self) -> str:
+        lines = []
+        for table in self.tables():
+            cols = ", ".join(f"{name} {kind}".strip() for name, kind in self.columns(table))
+            lines.append(f"{table}({cols})")
+        for table in self.tables():
+            for row in self._conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall():
+                lines.append(f"{table}.{row[3]} -> {row[2]}.{row[4]}")
+        # short value lists for columns like status or category help with filters
+        for table in self.tables():
+            for name, kind in self.columns(table):
+                if kind.upper() != "TEXT":
+                    continue
+                rows = self._conn.execute(
+                    f'SELECT DISTINCT "{name}" FROM "{table}" WHERE "{name}" IS NOT NULL LIMIT 9'
+                ).fetchall()
+                if 0 < len(rows) <= 8:
+                    lines.append(f"{table}.{name} values: " + ", ".join(str(r[0]) for r in sorted(rows)))
+        return "\n".join(lines)
+
     def query(self, sql: str, max_rows: int = 50) -> QueryResult:
         self._deadline = time.monotonic() + self.timeout
         try:

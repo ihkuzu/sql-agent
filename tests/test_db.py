@@ -51,3 +51,11 @@ def test_runaway_query_is_stopped(db_file):
 def test_bad_sql_gives_query_error(db):
     with pytest.raises(QueryError):
         db.query("SELECT nope FROM customers")
+
+
+def test_schema_text_lists_columns_and_foreign_keys(db):
+    text = db.schema_text()
+    assert "products(id INTEGER, name TEXT, category TEXT, price REAL)" in text
+    assert "order_items.product_id -> products.id" in text
+    assert "orders.status values: cancelled, delivered, returned" in text
+    assert "customers.name values" not in text
