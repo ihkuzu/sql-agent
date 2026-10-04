@@ -135,3 +135,31 @@ def test_gemini_does_not_retry_when_daily_quota_is_spent():
     with pytest.raises(LLMError, match="429"):
         llm.chat("s", MESSAGES)
     assert len(calls) == 1
+
+
+def test_ollama_retries_when_the_model_repeats_itself():
+    temps = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        temps.append(body["options"]["temperature"])
+        if len(temps) < 3:
+            return httpx.Response(500, text='{"error":"prediction aborted, token repeat limit reached"}')
+        return httpx.Response(200, json={"message": {"content": "ok"}})
+
+    llm = OllamaLLM(client=client(handler))
+    assert llm.chat("s", MESSAGES) == "ok"
+    assert temps == [0.0, 0.3, 0.6]
+
+
+def test_ollama_does_not_retry_other_server_errors():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(500, text="out of memory")
+
+    llm = OllamaLLM(client=client(handler))
+    with pytest.raises(LLMError, match="out of memory"):
+        llm.chat("s", MESSAGES)
+    assert len(calls) == 1

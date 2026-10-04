@@ -30,30 +30,37 @@ class OllamaLLM:
         self,
         model: str = "llama3.2:3b",
         host: str | None = None,
-        timeout: float = 180.0,
+        timeout: float = 600.0,
         client: httpx.Client | None = None,
+        retries: int = 2,
     ):
         self.model = model
+        self.retries = retries
         self.host = _normalize_host(host or os.getenv("OLLAMA_HOST") or "http://localhost:11434")
         self._client = client or httpx.Client(timeout=timeout)
 
     def chat(self, system: str, messages: Messages) -> str:
-        payload = {
-            "model": self.model,
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": 0},
-            "messages": [{"role": "system", "content": system}, *messages],
-        }
-        try:
-            response = self._client.post(f"{self.host}/api/chat", json=payload)
-            response.raise_for_status()
-            return response.json()["message"]["content"].strip()
-        except httpx.HTTPStatusError as error:
-            detail = error.response.text[:300]
-            raise LLMError(f"Ollama returned {error.response.status_code}: {detail}") from error
-        except (httpx.HTTPError, KeyError, ValueError) as error:
-            raise LLMError(f"request to Ollama at {self.host} failed: {error}") from error
+        for attempt in range(self.retries + 1):
+            payload = {
+                "model": self.model,
+                "stream": False,
+                "format": "json",
+                # a token cap and a higher temperature on retries break endless repetition
+                "options": {"temperature": 0.3 * attempt, "num_predict": 512, "repeat_penalty": 1.1},
+                "messages": [{"role": "system", "content": system}, *messages],
+            }
+            try:
+                response = self._client.post(f"{self.host}/api/chat", json=payload)
+                response.raise_for_status()
+                return response.json()["message"]["content"].strip()
+            except httpx.HTTPStatusError as error:
+                detail = error.response.text[:300]
+                if "repeat limit" in detail and attempt < self.retries:
+                    continue
+                raise LLMError(f"Ollama returned {error.response.status_code}: {detail}") from error
+            except (httpx.HTTPError, KeyError, ValueError) as error:
+                raise LLMError(f"request to Ollama at {self.host} failed: {error}") from error
+        raise LLMError("Ollama did not return a reply")
 
 
 class GeminiLLM:
