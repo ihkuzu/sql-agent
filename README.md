@@ -86,7 +86,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-61 tests run without a model. A scripted model replays prepared replies, which makes
+65 tests run without a model. A scripted model replays prepared replies, which makes
 the loop deterministic: the normal path, invalid JSON, unknown tools, wrong arguments,
 blocked SQL, SQL errors, repeated calls and the step limit are all covered. The guard,
 the read-only connection and the query timeout have their own tests, and the model
@@ -100,7 +100,7 @@ clients are tested against mocked HTTP responses.
   harmless query that contains a word like `update` inside a string.
 - Small local models make more mistakes with joins. The step limit and the error
   feedback help, but they do not replace a stronger model.
-- The Gemini client has been tested against mocked responses only.
+- The Gemini client is tested against mocked responses and retries when the API is overloaded or fails to parse its own JSON.
 
 ## Roadmap
 
