@@ -73,3 +73,24 @@ def test_get_llm_env(monkeypatch):
     assert isinstance(get_llm("gemini"), GeminiLLM)
     with pytest.raises(ValueError):
         get_llm("nope")
+
+
+def test_gemini_retries_invalid_json_error():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content)["input"])
+        if len(bodies) < 3:
+            return httpx.Response(400, text="Model generated invalid JSON syntax")
+        step = {"type": "model_output", "content": [{"type": "text", "text": "ok"}]}
+        return httpx.Response(200, json={"steps": [step]})
+
+    llm = GeminiLLM(api_key="k", client=client(handler))
+    assert llm.chat("s", MESSAGES) == "ok"
+    assert len(bodies) == 3 and "Previous attempt failed" in bodies[1]
+
+
+def test_gemini_gives_up_after_retries():
+    llm = GeminiLLM(api_key="k", retries=1, client=client(lambda r: httpx.Response(400, text="invalid JSON")))
+    with pytest.raises(LLMError, match="400"):
+        llm.chat("s", MESSAGES)
